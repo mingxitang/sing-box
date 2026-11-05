@@ -36,6 +36,9 @@ jobs:
           VERSION="1.15.0-alpha.13-smartfix.${GITHUB_SHA::8}"
           go run ./cmd/internal/build_libbox -target android-bin -platform android/arm64 \
             -version "$VERSION" -tags with_ebpf
+          "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
+            --strip-all sing-box-android-arm64-v8a
+          ls -lh sing-box-android-arm64-v8a
           mkdir -p dist
           cp sing-box-android-arm64-v8a dist/sing-box
           cd dist

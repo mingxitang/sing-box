@@ -45,8 +45,9 @@ icon: material/stethoscope
 
 本仓库的 `Build Android eBPF` 工作流仅编译 Android arm64-v8a 命令行内核，
 通过 `build_libbox -target android-bin -platform android/arm64 -tags with_ebpf`
-复用项目默认 Android tags。构建前运行 Smart 的 race 测试；产物与 SHA256SUMS
-在工作流的 `sing-box-android-arm64-v8a-default-ebpf` artifact 中。
+复用项目默认 Android tags。构建前运行 Smart 的 race 测试；
+打包前使用 NDK 的 `llvm-strip --strip-all` 裁剪符号，与上游发布流程一致。
+产物与 SHA256SUMS 在工作流的 `sing-box-android-arm64-v8a-default-ebpf` artifact 中。
 
 ## 最低限度材料
 
