@@ -3,35 +3,24 @@ name: Build Android eBPF
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    name: Build (${{ matrix.target.goarch }})
+    name: Android arm64 default + eBPF
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - goarch: arm64
-            compiler: aarch64-linux-android35-clang
-          - goarch: arm
-            goarm: "7"
-            compiler: armv7a-linux-androideabi35-clang
-          - goarch: amd64
-            compiler: x86_64-linux-android35-clang
-          - goarch: "386"
-            compiler: i686-linux-android35-clang
-    env:
-      BASE_TAGS: with_quic,with_dhcp,with_utls,with_clash_api,with_ebpf,badlinkname,tfogo_checklinkname0
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.8
+          go-version: 1.27.1
+
+      - name: Test Smart selection
+        run: go test -race ./common/smart
 
       - name: Setup Android NDK
         id: setup-ndk
@@ -39,20 +28,24 @@ jobs:
         with:
           ndk-version: r29
 
-      - name: Build
+      - name: Build default Android configuration plus eBPF
         env:
-          CGO_ENABLED: "1"
-          GOOS: android
-          GOARCH: ${{ matrix.target.goarch }}
-          GOARM: ${{ matrix.target.goarm }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          CC: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.target.compiler }}
         run: |
-          export TAGS="$BASE_TAGS"
-          make build
+          set -euo pipefail
+          VERSION="1.15.0-alpha.13-smartfix.${GITHUB_SHA::8}"
+          go run ./cmd/internal/build_libbox -target android-bin -platform android/arm64 \
+            -version "$VERSION" -tags with_ebpf
+          mkdir -p dist
+          cp sing-box-android-arm64-v8a dist/sing-box
+          cd dist
+          tar -czf "sing-box-${VERSION}-android-arm64-v8a-ebpf.tar.gz" sing-box
+          rm sing-box
+          sha256sum *.tar.gz > SHA256SUMS
 
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          name: sing-box-android-${{ matrix.target.goarch }}-with-ebpf
-          path: sing-box
+          name: sing-box-android-arm64-v8a-default-ebpf
+          path: dist/
+          if-no-files-found: error

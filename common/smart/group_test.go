@@ -2,6 +2,7 @@ package smart
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 )
@@ -46,6 +47,40 @@ func TestSelectPrefersReliableNode(t *testing.T) {
 	}
 	if d.Order[0] != 1 {
 		t.Fatalf("expected faster node 1, got %d (%s)", d.Order[0], d.Reason)
+	}
+}
+
+func TestSelectDisjointFilteredPool(t *testing.T) {
+	for _, apply := range []bool{false, true} {
+		t.Run(fmt.Sprint("apply=", apply), func(t *testing.T) {
+			g, cands := newTestGroup(t, 12)
+			now := Now()
+			pool := &g.pools[NetworkTCP&1]
+			// A busy group's committed members are all absent from this filtered view.
+			for _, c := range cands[:6] {
+				pool.ranked = append(pool.ranked, c.Node)
+			}
+			pool.limit = 6
+			pool.refreshedAt = now
+			committed := pool.Members()
+			view := cands[6:]
+			ctx := &Context{Network: NetworkTCP, Family: FamilyIPv4, Target: "filtered.test:443"}
+			d := g.Select(ctx, view, apply, now)
+			if len(d.Order) != len(view) || d.PoolSize == 0 {
+				t.Fatalf("incomplete filtered decision: %+v", d)
+			}
+			seen := make(map[int]bool)
+			for _, i := range d.Order {
+				if i < 0 || i >= len(view) || seen[i] {
+					t.Fatalf("invalid dial order: %v", d.Order)
+				}
+				seen[i] = true
+			}
+			g.Release(&d, view[d.Order[0]].Node)
+			if !slices.Equal(committed, pool.Members()) {
+				t.Fatal("filtered selection displaced the committed pool")
+			}
+		})
 	}
 }
 

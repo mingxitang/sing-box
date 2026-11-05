@@ -22,6 +22,32 @@ icon: material/stethoscope
 不要只凭“eBPF”一词推断责任路径。local `cgroup`、local `socket_assign`、shared
 `socket_assign` 和 shared `packet_rewrite` 使用不同 hook、map、交付和清理机制。
 
+## Smart 选路崩溃与连接错误
+
+如果堆栈包含 `common/smart.(*Group).trial` 和 `index out of range [-1]`，
+原因是 Smart 当前连接的过滤候选集可能与共享服务池完全不相交。原实现对空池
+返回 `-1`，随后试探选路访问该下标，导致 Go 进程退出。这与内核版本本身无关。
+修复后，空交集使用当前候选集的临时服务池，保留共享池；实际拨号与只读预览
+都必须返回有效的候选下标。回归检查：`go test -race ./common/smart`。
+更新前可临时把受影响的 Smart 组换成 selector 或 urltest，绕开该路径。
+
+`missing fakeip record` 表示目的 FakeIP 已没有对应的域名记录。这条错误会拒绝
+当前连接，本身不是上述 panic。启用 `experimental.cache_file.enabled` 和
+`experimental.cache_file.store_fakeip`，并将 `path` 指向模块可写且升级/重启后保留的
+绝对路径。保持 FakeIP 地址段和 `cache_id` 稳定；旧记录已经丢失时，需要让应用
+重新解析 DNS，持久化不能追溯恢复已经丢失的映射。
+
+`connect: network is unreachable` 表示该出站 socket 在当时的路由/策略下不可达，
+不能仅凭这条日志判断网卡故障或进程崩溃。检查复现时的 `ip rule`、
+`ip route show table all`、Wi-Fi/移动数据切换，以及出站的 `bind_interface`、
+`inet4_bind_address` 和 `routing_mark`。Android 还需核对模块配置的 UID/mark
+放行与 netd 策略。更换 NTP 服务器不能修复缺失的路由。
+
+本仓库的 `Build Android eBPF` 工作流仅编译 Android arm64-v8a 命令行内核，
+通过 `build_libbox -target android-bin -platform android/arm64 -tags with_ebpf`
+复用项目默认 Android tags。构建前运行 Smart 的 race 测试；产物与 SHA256SUMS
+在工作流的 `sing-box-android-arm64-v8a-default-ebpf` artifact 中。
+
 ## 最低限度材料
 
 请提供：

@@ -148,6 +148,15 @@ func (p *Pool) Derive(nodes []uint32, aggregate func(int) *Snapshot, failing fun
 	for i, node := range nodes {
 		mask[i] = target.containsLocked(node)
 	}
+	if !slices.Contains(mask, true) {
+		// A filtered view may exclude every committed member; serve it
+		// from a temporary pool without evicting other views' members.
+		projection := &Pool{demand: p.demand, demandAt: p.demandAt}
+		projection.deriveLocked(nodes, aggregate, failing, now)
+		for i, node := range nodes {
+			mask[i] = projection.containsLocked(node)
+		}
+	}
 	return mask
 }
 
