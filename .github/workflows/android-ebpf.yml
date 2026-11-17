@@ -154,6 +154,12 @@ jobs:
             prerelease="--prerelease"
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
+            for stale in $(gh release view "$tag" --json assets --jq '.assets[].name' \
+              | grep -F 'android-arm64-v8a-ebpf.tar.gz' || true); do
+              if [[ "$stale" != "$PACKAGE" ]]; then
+                gh release delete-asset "$tag" "$stale" --yes
+              fi
+            done
             gh release upload "$tag" "dist/$PACKAGE" --clobber
             gh release edit "$tag" --notes-file "$RUNNER_TEMP/notes.md" $prerelease
             echo "Updated release $tag" >> "$GITHUB_STEP_SUMMARY"
