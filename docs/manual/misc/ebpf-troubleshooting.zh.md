@@ -43,11 +43,17 @@ icon: material/stethoscope
 `inet4_bind_address` 和 `routing_mark`。Android 还需核对模块配置的 UID/mark
 放行与 netd 策略。更换 NTP 服务器不能修复缺失的路由。
 
-本仓库的 `Build Android eBPF` 工作流仅编译 Android arm64-v8a 命令行内核，
+`Track upstream releases for Android eBPF` 每六小时检查 MiChongs/sing-box 的正式版和预发行版，
+也可在 Actions 页面点 **Run workflow** 立即检查。自 `v1.15.0-alpha.13-xiaobaf14g.15`
+起，每项待构建发布都按其标签检出源码并应用 `.github/patches/smart-disjoint-pool.patch`。
+补丁冲突或测试失败时，查看该版本的作业日志，必要时更新补丁。工作流在上传产物后写入
+`android-ebpf-built/<release-id>` 标签，后续检查会跳过已成功构建的发布。
+
+`Build Android eBPF` 也可以手动编译本仓库当前分支。两种触发方式都只编译 Android arm64-v8a 命令行内核，
 通过 `build_libbox -target android-bin -platform android/arm64 -tags with_ebpf`
 复用项目默认 Android tags。构建前运行 Smart 的 race 测试；
 打包前使用 NDK 的 `llvm-strip --strip-all` 裁剪符号，与上游发布流程一致。
-产物与 SHA256SUMS 在工作流的 `sing-box-android-arm64-v8a-default-ebpf` artifact 中。
+在对应 Actions 运行的 **Artifacts** 中下载压缩包和 `SHA256SUMS`。自动构建的 artifact 名称包含上游标签。
 
 ## 最低限度材料
 

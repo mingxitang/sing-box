@@ -1,0 +1,52 @@
+name: Track upstream releases for Android eBPF
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-android-ebpf
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    outputs:
+      releases: ${{ steps.list.outputs.releases }}
+    steps:
+      - name: Find published upstream releases awaiting a build
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIRST_PUBLISHED_AT: '2026-11-17T04:38:19Z' # v1.15.0-alpha.13-xiaobaf14g.15
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/android-ebpf-built/" \
+            --jq '.[].ref | split("/") | last' > "$RUNNER_TEMP/android-ebpf-built"
+          gh api --paginate 'repos/MiChongs/sing-box/releases?per_page=100' \
+            --jq '.[] | select(.draft == false and .published_at != null) | {id: (.id | tostring), tag: .tag_name, published_at}' \
+            | jq -sc --arg since "$FIRST_PUBLISHED_AT" --rawfile built "$RUNNER_TEMP/android-ebpf-built" '
+                ($built | split("\n")) as $done
+                | map(select(.published_at >= $since and (.id as $id | $done | index($id) | not)))
+                | sort_by(.published_at, .id) | .[:256] | map({id, tag})
+              ' > "$RUNNER_TEMP/android-ebpf-pending"
+          printf 'releases=%s\n' "$(cat "$RUNNER_TEMP/android-ebpf-pending")" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.release.tag }}
+    needs: discover
+    if: needs.discover.outputs.releases != '[]'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.discover.outputs.releases) }}
+    uses: ./.github/workflows/android-ebpf.yml
+    with:
+      upstream_tag: ${{ matrix.release.tag }}
+      release_id: ${{ matrix.release.id }}

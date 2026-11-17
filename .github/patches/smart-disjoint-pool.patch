@@ -1,0 +1,73 @@
+diff --git a/common/smart/group_test.go b/common/smart/group_test.go
+index a644be6..acce514 100644
+--- a/common/smart/group_test.go
++++ b/common/smart/group_test.go
+@@ -2,6 +2,7 @@ package smart
+ 
+ import (
+ 	"fmt"
++	"slices"
+ 	"testing"
+ 	"time"
+ )
+@@ -49,6 +50,40 @@ func TestSelectPrefersReliableNode(t *testing.T) {
+ 	}
+ }
+ 
++func TestSelectDisjointFilteredPool(t *testing.T) {
++	for _, apply := range []bool{false, true} {
++		t.Run(fmt.Sprint("apply=", apply), func(t *testing.T) {
++			g, cands := newTestGroup(t, 12)
++			now := Now()
++			pool := &g.pools[NetworkTCP&1]
++			// A busy group's committed members are all absent from this filtered view.
++			for _, c := range cands[:6] {
++				pool.ranked = append(pool.ranked, c.Node)
++			}
++			pool.limit = 6
++			pool.refreshedAt = now
++			committed := pool.Members()
++			view := cands[6:]
++			ctx := &Context{Network: NetworkTCP, Family: FamilyIPv4, Target: "filtered.test:443"}
++			d := g.Select(ctx, view, apply, now)
++			if len(d.Order) != len(view) || d.PoolSize == 0 {
++				t.Fatalf("incomplete filtered decision: %+v", d)
++			}
++			seen := make(map[int]bool)
++			for _, i := range d.Order {
++				if i < 0 || i >= len(view) || seen[i] {
++					t.Fatalf("invalid dial order: %v", d.Order)
++				}
++				seen[i] = true
++			}
++			g.Release(&d, view[d.Order[0]].Node)
++			if !slices.Equal(committed, pool.Members()) {
++				t.Fatal("filtered selection displaced the committed pool")
++			}
++		})
++	}
++}
++
+ func TestIncumbentHeldWithoutComparableGain(t *testing.T) {
+ 	g, cands := newTestGroup(t, 2)
+ 	ctx := &Context{Network: NetworkTCP, Family: FamilyIPv4, Target: "a.test:443"}
+diff --git a/common/smart/pool.go b/common/smart/pool.go
+index 473b343..0bf7582 100644
+--- a/common/smart/pool.go
++++ b/common/smart/pool.go
+@@ -148,6 +148,15 @@ func (p *Pool) Derive(nodes []uint32, aggregate func(int) *Snapshot, failing fun
+ 	for i, node := range nodes {
+ 		mask[i] = target.containsLocked(node)
+ 	}
++	if !slices.Contains(mask, true) {
++		// A filtered view may exclude every committed member; serve it
++		// from a temporary pool without evicting other views' members.
++		projection := &Pool{demand: p.demand, demandAt: p.demandAt}
++		projection.deriveLocked(nodes, aggregate, failing, now)
++		for i, node := range nodes {
++			mask[i] = projection.containsLocked(node)
++		}
++	}
+ 	return mask
+ }
+ 

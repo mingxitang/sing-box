@@ -2,6 +2,14 @@ name: Build Android eBPF
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      upstream_tag:
+        type: string
+        required: true
+      release_id:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -13,13 +21,42 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Checkout upstream release
+        if: inputs.upstream_tag != ''
+        uses: actions/checkout@v6
+        with:
+          repository: MiChongs/sing-box
+          ref: refs/tags/${{ inputs.upstream_tag }}
+          path: upstream
+          persist-credentials: false
+
+      - name: Apply Smart crash fix
+        if: inputs.upstream_tag != ''
+        working-directory: upstream
+        env:
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$UPSTREAM_TAG" =~ ^v[0-9][A-Za-z0-9._+-]*$ ]]
+          patch="$GITHUB_WORKSPACE/.github/patches/smart-disjoint-pool.patch"
+          if git apply --check --reverse --index "$patch"; then
+            echo 'Upstream already contains the patch and regression test.'
+          else
+            git apply --index "$patch"
+          fi
+          printf 'Upstream tag `%s` at `%s`\n' "$UPSTREAM_TAG" "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version: 1.27.1
+          cache-dependency-path: ${{ inputs.upstream_tag && 'upstream/go.sum' || 'go.sum' }}
 
       - name: Test Smart selection
+        working-directory: ${{ inputs.upstream_tag && 'upstream' || '.' }}
         run: go test -race ./common/smart
 
       - name: Setup Android NDK
@@ -29,11 +66,14 @@ jobs:
           ndk-version: r29
 
       - name: Build default Android configuration plus eBPF
+        working-directory: ${{ inputs.upstream_tag && 'upstream' || '.' }}
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
         run: |
           set -euo pipefail
-          VERSION="1.15.0-alpha.13-smartfix.${GITHUB_SHA::8}"
+          VERSION="${UPSTREAM_TAG#v}"
+          VERSION="${VERSION:-1.15.0-alpha.13}-smartfix.${GITHUB_SHA::8}"
           go run ./cmd/internal/build_libbox -target android-bin -platform android/arm64 \
             -version "$VERSION" -tags with_ebpf
           "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
@@ -49,6 +89,24 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          name: sing-box-android-arm64-v8a-default-ebpf
-          path: dist/
+          name: sing-box-android-arm64-v8a-default-ebpf${{ inputs.upstream_tag && format('-{0}', inputs.upstream_tag) || '' }}
+          path: ${{ inputs.upstream_tag && 'upstream/dist/' || 'dist/' }}
           if-no-files-found: error
+
+  record:
+    name: Record successful upstream build
+    if: inputs.release_id != ''
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Mark release as built
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/android-ebpf-built/$RELEASE_ID" -f "sha=$GITHUB_SHA"
