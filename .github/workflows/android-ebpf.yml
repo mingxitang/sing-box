@@ -28,6 +28,9 @@ jobs:
     concurrency:
       group: android-ebpf-package
       queue: max
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      package: ${{ steps.version.outputs.package }}
     steps:
       - name: Choose package version
         id: version
@@ -125,19 +128,60 @@ jobs:
           if-no-files-found: error
 
   record:
-    name: Record successful upstream build
-    if: inputs.release_id != ''
+    name: Publish Android eBPF release
+    if: inputs.upstream_tag != ''
     needs: build
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+      RELEASE_ID: ${{ inputs.release_id }}
+      PACKAGE: ${{ needs.build.outputs.package }}
+      VERSION: ${{ needs.build.outputs.version }}
     steps:
       - name: Mark release as built
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_ID: ${{ inputs.release_id }}
+        if: inputs.release_id != ''
         run: |
           set -euo pipefail
           [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
             -f "ref=refs/tags/android-ebpf-built/$RELEASE_ID" -f "sha=$GITHUB_SHA"
+
+      - name: Download package
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.build.outputs.package }}
+          path: dist
+
+      - name: Publish release
+        run: |
+          set -euo pipefail
+          [[ "$UPSTREAM_TAG" =~ ^v[0-9][A-Za-z0-9._+-]*$ ]]
+          ls -lh "dist/$PACKAGE"
+          tag="android-ebpf-${UPSTREAM_TAG}"
+          digest=$(sha256sum "dist/$PACKAGE" | cut -d' ' -f1)
+          {
+            echo "Android arm64-v8a build with eBPF for upstream [$UPSTREAM_TAG](https://github.com/MiChongs/sing-box/releases/tag/$UPSTREAM_TAG)."
+            echo
+            echo "- package version: \`$VERSION\`"
+            echo "- patch: \`smart-disjoint-pool.patch\`"
+            echo "- checksum: \`$digest\`"
+          } > "$RUNNER_TEMP/notes.md"
+          prerelease=""
+          if [[ "$UPSTREAM_TAG" =~ -(alpha|beta|rc|preview|dev)([.-]|$) ]]; then
+            prerelease="--prerelease"
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "dist/$PACKAGE" --clobber
+            gh release edit "$tag" --notes-file "$RUNNER_TEMP/notes.md" $prerelease
+            echo "Updated release $tag" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh release create "$tag" "dist/$PACKAGE" \
+              --target "$GITHUB_SHA" \
+              --title "Android arm64 eBPF · ${UPSTREAM_TAG}" \
+              --notes-file "$RUNNER_TEMP/notes.md" $prerelease
+            echo "Created release $tag" >> "$GITHUB_STEP_SUMMARY"
+          fi
