@@ -132,6 +132,7 @@ jobs:
         working-directory: ${{ inputs.upstream_tag && 'upstream' || '.' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           UPSTREAM_TAG: ${{ inputs.upstream_tag }}
           PACKAGE: ${{ steps.version.outputs.package }}
           VERSION: ${{ steps.version.outputs.version }}
