@@ -49,11 +49,14 @@ icon: material/stethoscope
 补丁冲突或测试失败时，查看该版本的作业日志，必要时更新补丁。工作流在上传产物后写入
 `android-ebpf-built/<release-id>` 标签，后续检查会跳过已成功构建的发布。
 
-`Build Android eBPF` 也可以手动编译本仓库当前分支。两种触发方式都只编译 Android arm64-v8a 命令行内核，
+`Build Android eBPF` 可以手动编译本仓库当前分支，也可以填写 `upstream_tag` 重新构建指定上游标签。
+两种触发方式都只编译 Android arm64-v8a 命令行内核，
 通过 `build_libbox -target android-bin -platform android/arm64 -tags with_ebpf`
 复用项目默认 Android tags。构建前运行 Smart 的 race 测试；
 打包前使用 NDK 的 `llvm-strip --strip-all` 裁剪符号，与上游发布流程一致。
-在对应 Actions 运行的 **Artifacts** 中下载压缩包和 `SHA256SUMS`。自动构建的 artifact 名称包含上游标签。
+在对应 Actions 运行的 **Artifacts** 中直接下载 `.tar.gz`，解压得到 `sing-box`。
+文件名和程序版本使用上游基础版本加北京时间构建日期，例如 `1.15.0-alpha.13+20261117`。
+同一基础版本同一天再次构建时，依次追加 `.2`、`.3`。原始上游标签和提交在运行摘要中可查。
 
 ## 最低限度材料
 

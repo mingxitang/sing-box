@@ -41,9 +41,11 @@ jobs:
     needs: discover
     if: needs.discover.outputs.releases != '[]'
     permissions:
+      actions: read
       contents: write
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         release: ${{ fromJSON(needs.discover.outputs.releases) }}
     uses: ./.github/workflows/android-ebpf.yml

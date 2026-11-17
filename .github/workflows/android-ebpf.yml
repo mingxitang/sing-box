@@ -2,6 +2,10 @@ name: Build Android eBPF
 
 on:
   workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Upstream release tag (leave blank to build this branch)'
+        type: string
   workflow_call:
     inputs:
       upstream_tag:
@@ -18,7 +22,38 @@ jobs:
   build:
     name: Android arm64 default + eBPF
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    concurrency:
+      group: android-ebpf-package
+      queue: max
     steps:
+      - name: Choose package version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          set -euo pipefail
+          tag="${UPSTREAM_TAG:-v1.15.0-alpha.13}"
+          if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc|preview|dev)(\.[0-9]+)?)?)([-+]|$) ]]; then
+            echo "::error::Cannot derive a version from tag $tag"
+            exit 1
+          fi
+          base="${BASH_REMATCH[1]}+$(TZ=Asia/Shanghai date +%Y%m%d)"
+          version="$base"
+          for ((sequence = 2; ; sequence++)); do
+            package="sing-box-${version}-android-arm64-v8a-ebpf.tar.gz"
+            count=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/artifacts" \
+              -f "name=$package" --jq '.total_count')
+            if [[ "$count" == 0 ]]; then
+              break
+            fi
+            version="${base}.${sequence}"
+          done
+          printf 'version=%s\npackage=%s\n' "$version" "$package" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -69,28 +104,24 @@ jobs:
         working-directory: ${{ inputs.upstream_tag && 'upstream' || '.' }}
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE: ${{ steps.version.outputs.package }}
         run: |
           set -euo pipefail
-          VERSION="${UPSTREAM_TAG#v}"
-          VERSION="${VERSION:-1.15.0-alpha.13}-smartfix.${GITHUB_SHA::8}"
           go run ./cmd/internal/build_libbox -target android-bin -platform android/arm64 \
             -version "$VERSION" -tags with_ebpf
           "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
             --strip-all sing-box-android-arm64-v8a
           ls -lh sing-box-android-arm64-v8a
           mkdir -p dist
-          cp sing-box-android-arm64-v8a dist/sing-box
-          cd dist
-          tar -czf "sing-box-${VERSION}-android-arm64-v8a-ebpf.tar.gz" sing-box
-          rm sing-box
-          sha256sum *.tar.gz > SHA256SUMS
+          install -m 755 sing-box-android-arm64-v8a "$RUNNER_TEMP/sing-box"
+          tar -czf "dist/$PACKAGE" -C "$RUNNER_TEMP" sing-box
 
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          name: sing-box-android-arm64-v8a-default-ebpf${{ inputs.upstream_tag && format('-{0}', inputs.upstream_tag) || '' }}
-          path: ${{ inputs.upstream_tag && 'upstream/dist/' || 'dist/' }}
+          path: ${{ format('{0}dist/{1}', inputs.upstream_tag && 'upstream/' || '', steps.version.outputs.package) }}
+          archive: false
           if-no-files-found: error
 
   record:
