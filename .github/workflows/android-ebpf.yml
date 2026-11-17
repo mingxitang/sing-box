@@ -130,6 +130,11 @@ jobs:
       - name: Publish release
         if: inputs.upstream_tag != ''
         working-directory: ${{ inputs.upstream_tag && 'upstream' || '.' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          PACKAGE: ${{ steps.version.outputs.package }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           [[ "$UPSTREAM_TAG" =~ ^v[0-9][A-Za-z0-9._+-]*$ ]]
