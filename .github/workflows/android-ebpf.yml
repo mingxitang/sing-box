@@ -139,13 +139,16 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$UPSTREAM_TAG" =~ ^v[0-9][A-Za-z0-9._+-]*$ ]]
-          ls -lh "dist/$PACKAGE"
-          tag="android-ebpf-${UPSTREAM_TAG}"
-          digest=$(sha256sum "dist/$PACKAGE" | cut -d' ' -f1)
+          # 与 SagerNet 官方命名保持一致：tag = v<version>，资产 = sing-box-<version>-android-arm64.tar.gz
+          tag="v${VERSION}"
+          asset="sing-box-${VERSION}-android-arm64.tar.gz"
+          cp "dist/$PACKAGE" "dist/$asset"
+          digest=$(sha256sum "dist/$asset" | cut -d' ' -f1)
+          ls -lh "dist/$asset"
           {
             echo "Android arm64-v8a build with eBPF for upstream [$UPSTREAM_TAG](https://github.com/MiChongs/sing-box/releases/tag/$UPSTREAM_TAG)."
             echo
-            echo "- package version: \`$VERSION\`"
+            echo "- version: \`$VERSION\`"
             echo "- patch: \`smart-disjoint-pool.patch\`"
             echo "- checksum: \`$digest\`"
           } > "$RUNNER_TEMP/notes.md"
@@ -154,20 +157,16 @@ jobs:
             prerelease="--prerelease"
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
-            for stale in $(gh release view "$tag" --json assets --jq '.assets[].name' \
-              | grep -F 'android-arm64-v8a-ebpf.tar.gz' || true); do
-              if [[ "$stale" != "$PACKAGE" ]]; then
+            for stale in $(gh release view "$tag" --json assets --jq '.assets[].name' | grep -F -- '-android-arm64.tar.gz' || true); do
+              if [[ "$stale" != "$asset" ]]; then
                 gh release delete-asset "$tag" "$stale" --yes
               fi
             done
-            gh release upload "$tag" "dist/$PACKAGE" --clobber
+            gh release upload "$tag" "dist/$asset" --clobber
             gh release edit "$tag" --notes-file "$RUNNER_TEMP/notes.md" $prerelease
             echo "Updated release $tag" >> "$GITHUB_STEP_SUMMARY"
           else
-            gh release create "$tag" "dist/$PACKAGE" \
-              --target "$GITHUB_SHA" \
-              --title "Android arm64 eBPF · ${UPSTREAM_TAG}" \
-              --notes-file "$RUNNER_TEMP/notes.md" $prerelease
+            gh release create "$tag" "dist/$asset" --target "$GITHUB_SHA" --title "sing-box ${VERSION} · Android arm64-v8a eBPF" --notes-file "$RUNNER_TEMP/notes.md" $prerelease
             echo "Created release $tag" >> "$GITHUB_STEP_SUMMARY"
           fi
 
